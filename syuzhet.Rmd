@@ -1,0 +1,389 @@
+---
+title: "Sentiment analysis of Fyodor Dostoyevsky's The Idiot and comparison with other works"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document: default
+---
+In this report I use syuzhet R package to conduct analysis of one of my favourite books - Fyodor Dostoyevsky's The Idiot. We explore syuzhet package capabilites to see how sentiments change throughout the book. We compare different method of measuring sentiment and visualising it. Next we compare The Idiot with other works of Fyodor Dostoyevsky. Finally we do similar comparison with works of Leo Tolstoy, another great russian writer from the same epoch.
+
+```{r warning=FALSE}
+#devtools::install_github("mjockers/syuzhet")
+Sys.setenv(JAVA_HOME="/Library/Java/JavaVirtualMachines/jdk1.8.0_20.jdk/Contents/Home")
+library(syuzhet)
+library(tidyverse)
+library(gutenbergr)
+library(forcats)
+library(ggthemes)
+library(viridis)
+```
+We will use Gutenberg Project Library to get the text. First let's examine which work of Dostoyevsky we have available. We use gutenbergr R package.
+```{r}
+dostoyevsky <- gutenberg_authors %>% filter(author == "Dostoyevsky, Fyodor") 
+```
+We focus on work which I remeber well - The Idiot.
+```{r}
+(idiot_gutenberger_entry <- gutenberg_works(author == "Dostoyevsky, Fyodor", language == "en", title == "The Idiot"))
+```
+First we check the format, and see if text was downloaded correctly. 
+```{r}
+idiot <- gutenberg_download(idiot_gutenberger_entry["gutenberg_id"])
+head(idiot)
+```
+The Idiot constitutes of 4 parts. As the work is long (Mordern Library edition has 667 pages), we will split into part for sake of visualisation. First we extract the sentences from the text using get_sentences method from syuzhet. Next we find where different parts of the book begin.
+```{r}
+idiot_v <- get_sentences(idiot$text)
+part_1_start = grep("PART I", idiot_v)[1]
+part_2_start = grep("PART II", idiot_v)[1]
+part_3_start = grep("PART III", idiot_v)[1]
+part_4_start = grep("PART IV", idiot_v)[1]
+```
+
+We evaluate emotional valence on each sentence using 4 methods available in Syuzhet - defualt(syuzhet), bing, afinn and nrc. Additionally we also extract different sentiment from nrc lexicon.
+```{r}
+linenumber = seq_along(idiot_v)
+syuzhet_vector <- get_sentiment(idiot_v, method="syuzhet")
+bing_vector <- get_sentiment(idiot_v, method="bing")
+afinn_vector <- get_sentiment(idiot_v, method="afinn")
+nrc_vector <- get_sentiment(idiot_v, method="nrc")
+nrc_sentiment <- get_nrc_sentiment(idiot_v)
+
+idiot_sentiment <- cbind(
+                    tibble(linenumber = linenumber,
+                           text = idiot_v,
+                           syuzhet_emotional_valence = syuzhet_vector,
+                           bing_emotional_valence = bing_vector,
+                           afinn_emotional_valence = afinn_vector,
+                           nrc_emotional_valence = nrc_vector),
+                    nrc_sentiment)
+head(idiot_sentiment)
+```
+We annotate different parts of the book and provide additional numering for each part to make visualisation of results easier.
+
+```{r}
+idiot_sentiment["part"] = "PART I"
+idiot_sentiment[part_2_start:part_3_start, "part"] = "PART II"
+idiot_sentiment[part_3_start:part_4_start, "part"] = "PART III"
+idiot_sentiment[part_4_start:dim(idiot_sentiment)[1], "part"] = "PART IV"
+idiot_sentiment$part = as.factor(idiot_sentiment$part)
+idiot_sentiment[idiot_sentiment$part == "PART I", "part_linenumber"] = seq_along(1:(part_2_start - 1))
+idiot_sentiment[idiot_sentiment$part == "PART II", "part_linenumber"] = seq_along(part_2_start:(part_3_start-1))
+idiot_sentiment[idiot_sentiment$part == "PART III", "part_linenumber"] = seq_along(part_3_start:(part_4_start-1))
+idiot_sentiment[idiot_sentiment$part == "PART IV", "part_linenumber"] = seq_along(part_4_start:dim(idiot_sentiment)[1])
+#head(idiot_sentiment$part)
+#tail(idiot_sentiment$part)
+```
+
+
+```{r}
+theme_syuzhet <- #theme_tufte() +
+  theme(axis.ticks =element_line()) +
+  theme(axis.text =element_text(size=6)) +
+  theme(panel.border=element_blank()) +
+  theme(legend.title=element_text(size=6)) +
+  theme(legend.title.align=1) +
+  theme(legend.text=element_text(size=6)) +
+  theme(legend.position="bottom") +
+  theme(legend.key.size=unit(0.2, "cm")) +
+  theme(legend.key.width=unit(1, "cm")) 
+
+theme_syuzhet_no_x_axis <- theme_syuzhet +
+  theme(axis.ticks=element_blank(), axis.text.x=element_blank()) 
+  
+```
+Finally we can plot extracted sentiment. We use different colours for different sentiment extraction method.
+
+```{r}
+idiot_sentiment_by_method <- idiot_sentiment %>%
+            select(linenumber, part_linenumber, part,
+                  syuzhet_emotional_valence,
+                  bing_emotional_valence,
+                  afinn_emotional_valence,
+                  nrc_emotional_valence) %>%
+        gather(method, emotional_valence, syuzhet_emotional_valence : nrc_emotional_valence)
+ggplot(idiot_sentiment_by_method, aes(x = part_linenumber, y = emotional_valence, color = method)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  facet_wrap(~part, nrow = 4) +
+  theme_syuzhet +
+  labs(y="Sentiment Score", x="Narrative Lenght", title = expression(paste("Emotional Valence in ", italic("The Idiot")))) 
+```
+These plots need zooming to be reabable, but we can see that scales used by different methods are slightly different and some of them give only discrete values. Definately plotting these as point plots might not the best idea, let's try line plot instead.
+
+```{r}
+ggplot(idiot_sentiment_by_method, aes(x = part_linenumber, y = emotional_valence, color = method)) +
+  geom_line(alpha = 0.5) +
+  facet_wrap(~part,  nrow = 4) +
+  theme_syuzhet +
+  labs(y="Sentiment Score", x="Narrative Lenght", title = expression(paste("Emotional Valence in ", italic("The Idiot")))) 
+```
+With lineplots we start two notice better general variability of emotional valance, and some extreme points. We will examine these extreme points now to get better intutions about numbers we are obtaining. We zoom in a bit at points with strongest negative emotions.
+```{r}
+idiot_sentiment_by_method %>% filter(linenumber > 300, linenumber < 500) %>%
+ggplot( aes(x = linenumber, y = emotional_valence, color = method)) +
+  geom_line(alpha = 0.5) +
+  theme_syuzhet +
+  labs(y="Sentiment Score", x="Narrative Lenght", title = expression(paste("Emotional Valence in ", italic("The Idiot")," - lines 300 - 500"))) 
+```
+```{r}
+idiot_sentiment %>% filter(linenumber >= 405, linenumber < 415)
+```
+Seems like line 406 is the most negative one.
+```{r}
+idiot_sentiment %>% filter(linenumber == 406) %>% select(text)
+```
+This surely sounds negative - lets see what other emotions it conveys.
+```{r}
+emotions <- c("anger", "anticipation", "disgust", "fear", 
+                                "joy", "sadness", "surprise", "trust")
+idiot_sentiment %>% filter(linenumber == 406) %>% select(one_of(emotions))
+```
+Emotions captured in the sentence obviously depend on larger context, but judging by sentence itself, authomatically recognized emotions are quite accurate. 
+Let's look at another low point - around line number 10000.
+```{r}
+idiot_sentiment_by_method %>% filter(linenumber > 10000, linenumber < 10100) %>%
+ggplot( aes(x = linenumber, y = emotional_valence, color = method)) +
+  geom_line(alpha = 0.5) +
+  theme_syuzhet +
+  labs(y="Sentiment Score", x="Narrative Lenght", title = expression(paste("Emotional Valence in ", italic("The Idiot")," - lines 10000 - 10100"))) 
+```
+```{r}
+idiot_sentiment %>% filter(linenumber >= 10025, linenumber < 10035)
+```
+This time line 10030 is the most negative.
+```{r}
+idiot_sentiment %>% filter(linenumber == 10030) %>% select(text)
+```
+```{r}
+idiot_sentiment %>% filter(linenumber == 10030) %>% select(one_of(emotions))
+```
+Again - it seems that our method might be off, but again reasonably so.
+
+Having better understanding and some proof of accuracy of obtained scores let's come back to our comparison. Let's try plotting smoothed values for different scoring methods. 
+```{r}
+ggplot(idiot_sentiment_by_method, aes(x = part_linenumber, y = emotional_valence, color = method)) +
+  geom_smooth(alpha = 0.5, se= FALSE) +
+  facet_wrap(~part, nrow = 4) +
+  theme_syuzhet +
+  labs(y="Sentiment Score", x="Narrative Lenght", title = expression(paste("Emotional Valence in ", italic("The Idiot")," - smoothed"))) 
+
+```
+Plot presents smoothed sentiments comuted with different methods. Smoothing is done by fitting GAM(Generalized Additive Model) to the data, curve is approximated by spline. We see that all curves share the same basic shape. For the further analysis we will use Syuzhet default sentiment valence estimation method. Rest of the sentiments will be measured with NRC method.
+
+First let's again look at the plot. This time instead of ggplot we use plotting capabilities of Syuzhet. Shape is different here, as we use single curve for the whole novel, and we use different smothing method. General shape of the curve seems to be acurrately representing the novel. At the beginning of the novel there are many postive emotions which go steadily more negative until the middle of first part. From this point sentimnt is oscilating but stays on the negative side. Finally we reach the lowest point around line 10000 - 11000. This is the point round the end of part 3 and beggining of part 4. From this point emotion steadily rise util the ending which is again on the sad note. This reflects event in the novel well, althought some of the plots - e.g. simplified macro shape don't capture dip at the end of the novel.
+
+```{r}
+simple_plot(idiot_sentiment$syuzhet_emotional_valence)
+```
+Now let's inspect how different emotions appear in the novel.
+
+```{r}
+emotions <- idiot_sentiment %>% select(linenumber, part, part_linenumber, anger, anticipation, 
+                                      disgust, fear, joy, sadness, surprise, 
+                                      trust) %>% 
+        gather(sentiment, value, anger:trust)
+emotions$sentiment <- as_factor(emotions$sentiment)
+emotions$sentiment <- fct_relevel(emotions$sentiment, c("joy","trust","anticipation","surprise","sadness","disgust","fear","anger"))
+head(emotions)
+```
+
+```{r}
+emotions %>%
+  ggplot(aes(x = part_linenumber, y = sentiment, fill = value)) +
+  geom_tile(width = 3) +
+  facet_wrap(~part, nrow = 4) +
+  scale_fill_viridis(name="Sentiment\nScore") +
+  labs(x=NULL, y=NULL, title=expression(paste("Sentiment in ", italic("The Idiot")))) +
+  theme_tufte() +
+  theme_syuzhet +
+  scale_x_discrete(expand=c(0,0))
+
+```
+On the plot we negative emotion in the higher parts of the stripe and positive ones in the lower part. In general we see that sentiment score stays low most of the time, but there are particular episodes(in particular in fist part) with stronger negative and positive emotions. 
+Now let's try making use of more complex functionalities of Syuzhet.
+
+
+```{r}
+gutenberg_sentiments <- function(work) {
+  sentence_v <- get_sentences(work$text)
+  linenumber <- seq_along(sentence_v)
+  emotional_valence <- get_sentiment(sentence_v, method="syuzhet")
+  nrc_sentiment <- get_nrc_sentiment(sentence_v)
+  cbind(
+    tibble(linenumber = linenumber,
+          text = sentence_v,
+          emotional_valence = emotional_valence),
+    nrc_sentiment)
+}
+
+sentiment_tranformed <- function(sentiment, 
+                                 columns,
+                                 func = get_dct_transform) {
+  transformed_list <- columns %>% map(~ func(sentiment[,.x]))
+  names(transformed_list) <- columns
+  transformed_list[["index"]] <- seq_along(transformed_list[[1]])
+  as.tibble(transformed_list)
+}
+
+emotion_columns = c("joy","trust","anticipation","surprise","sadness","disgust","fear","anger")
+valence_and_emotions = c("emotional_valence", emotion_columns)
+
+emotional_summary <- function(sentiment) {
+  colSums(prop.table(sentiment[,emotion_columns]))
+}
+```
+
+```{r}
+idiot_sentiment["emotional_valence"] <- idiot_sentiment["syuzhet_emotional_valence"]
+idiot_dct_tranformed <- sentiment_tranformed(idiot_sentiment, valence_and_emotions)
+idiot_fourier_transformed <- sentiment_tranformed(idiot_sentiment, valence_and_emotions, get_transformed_values)
+```
+
+Syuzhet have two methods of creating curves aproximating "emotional shape" of the novel - by Fourier transform with low pass filter and by Discrete Cosine Transport(dct). We inspect both methods.
+```{r}
+idiot_dct_tranformed["method"] <- "dct"
+idiot_fourier_transformed["method"] <- "fourier"
+idiot_fourier_transformed %>% gather(sentiment, value, joy:anger) %>%
+ggplot(aes(x = index, y = value, color = sentiment)) +
+  labs(y="Sentiment Score", x="Normalized Narrative Length") +
+  geom_line() +
+  theme_syuzhet
+```
+
+First let's see effect of using Fourier transform to get smoother version of sentiment curves for The Idiot. We see artifacts at the beginning and at the end of the novel. They are due to periodicity of fourier functions. This problem was noticed by authors and others https://annieswafford.wordpress.com/2015/03/30/why-syuzhet-doesnt-work-and-how-we-know/ nd other http://www.matthewjockers.net/ . This is why currently author recommends using other method. Still plot gives us idea which emotiona are most strongly expressed through the narratve. We see that all emotions have similar base shape, but slightly different levels.
+
+
+```{r}
+idiot_dct_tranformed %>% gather(sentiment, value, joy:anger) %>%
+ggplot(aes(x = index, y = value, color = sentiment)) + geom_line() + theme_syuzhet
+```
+
+DCT tranfrom gives slightly different picture. Artifical dips at the beggining and at the end of the novel and not present anymore. We see that trust, anticipation and joy and surprise oscilating through the narrative time, starting high, and having two low points around 1/4-th and 3/4th of the narrive time, while negative emotions like anger, sadness and disgust start on the lower point and slowly raise, until the highest point which happens after the half of the novel(later for disgust). From this point they lower slighly until the end of the novel.
+Having well annotated novel could allow us to connect certain sentiments to specific moment in the narrative. At the current moment conducting such analysis is rather hard, nor long and complex novel like The Idiot and requires very good knowlegde of the text.
+
+Although trasnformations are usefull in conducting analysis of general theme of the text, i believe one of it's main advantedeg is it's normalizing effet which allows ust to compare different texts. To explore this possibility I conduct simple analysis of emotional valence and expressed sentiment in the most famous works of Fyodor Dostoyevsky and Leo Tolstoy.
+
+```{r}
+gutenberg_works(author == "Dostoyevsky, Fyodor", language == "en") 
+```
+```{r}
+notes_from_underground <- gutenberg_download(600)
+gambler <-gutenberg_download(2197)
+crime_and_punishment <- gutenberg_download(2554)
+brothers_karamazov <- gutenberg_download(28054)
+white_nights <- gutenberg_download(36034)
+```
+```{r}
+gutenberg_works(author == "Tolstoy, Leo, graf", language == "en") 
+```
+```{r}
+#father_sergius <- gutenberg_download(985)
+war_and_peace <- gutenberg_download(2600)
+master_and_man <- gutenberg_download(986)
+anna_karenina <- gutenberg_download(1399)
+resurrection <- gutenberg_download(1938)
+```
+I use Project Guteberg again for this aim. I take 6 works from Fyodor Dostoyevsky - Notes from the Underground, Gambler, White Nights, Crime and Punishment, Idiot and Brothers Karamazov. I wanted to incude both 3 'greatest' works of Dostoyevsky as well as some acclaimed shorter works. Similarly for Leo Toylsto I analyze his 2 most famoust works Anna Karenina and War and Peace, and two of the later work - Master and Man and Resurrection. 
+
+```{r}
+author_sentiments <- function(works) {
+   works %>%
+    map(gutenberg_sentiments)
+}
+
+author_emotional_summary <- function(works) {
+  works %>%
+    map(~emotional_summary(gutenberg_sentiments(.x))) %>%
+    map2(names(works), ~ c(.x, title = .y)) %>%
+    reduce(rbind)
+}
+
+author_valence <- function(works) {
+  works %>%
+    map(~ sentiment_tranformed(gutenberg_sentiments(.x), c("emotional_valence"))) %>%
+    map2_df(names(works), ~ mutate(.x, title = .y))
+}
+
+```
+
+```{r}
+
+tolstoy_works <- list(war_and_peace, anna_karenina, master_and_man, resurrection)
+names(tolstoy_works) <- c("War and Peace", "Anna Karenina","Master and Man", "Resurrection")
+tolstoy_emotional_valence <- author_valence(tolstoy_works)
+tolstoy_emotional_summary <- author_emotional_summary(tolstoy_works)
+```
+
+```{r}
+dostoyevsky_works <- list(white_nights, notes_from_underground, gambler, crime_and_punishment, idiot, brothers_karamazov)
+names(dostoyevsky_works) <- c("White Nights", "Notes from the underground", "Gambler", "Crime and Punishment", "The Idiot", "Brothers Karamazov")
+dostoyevsky_emotional_valence <- author_valence(dostoyevsky_works)
+dostoyevsky_emotional_summary <- author_emotional_summary(dostoyevsky_works)
+
+```
+First we look at emotional valence in the works of Dostoyevsky.
+```{r}
+dostoyevsky_emotional_valence %>%
+ggplot(aes(x = index, y = emotional_valence, color = title)) +
+  geom_line() +
+  theme_syuzhet + 
+  labs(y="Emotional Valence", x="Normalized Narrative Length")
+  
+
+```
+It seems that Idiot is quite an unsual works for Dostoyevsky, it is much more positive than his other works. We see that most of the works either oscilate between positive and negative emotiona , and largly negative. We see also that shapes differ quite singificantly between different text, nd there doesn't seem to be Dostoyesky formula for a novel. To get better perspective let's now take a look at works of the other great russian writer from the 19th century - Leo Tolstoy.
+
+```{r}
+tolstoy_emotional_valence %>%
+ggplot(aes(x = index, y = emotional_valence, color = title)) +
+  geom_line() +
+  theme_syuzhet + 
+  labs(y="Emotional Valence", x="Normalized Narrative Length")
+```
+One common theme of Tolstoy's works is that the thye containe more positive emotions and his most famoust works "Anna Karenina" and War and Peace have their emotional valence higher than later work.
+```{r}
+tolstoy_emotional_valence["author"] = "Tolstoy, Leo"
+dostoyevsky_emotional_valence["author"] = "Dostoyevsky, Fyodor"
+rbind(tolstoy_emotional_valence,dostoyevsky_emotional_valence) %>%
+ggplot(aes(x = index, y = emotional_valence, color = title, linetype = author)) +
+  geom_line() + 
+  #theme_syuzhet + 
+  labs(y="Emotional Valence", x="Normalized Narrative Length")
+```
+When we compare both writers we see that Tolstoy works are much stronger in postive emotions than works of Dostoyevsky. The Idiot is quite outstanding, compared to other Dostoyevsky works, and actually is closer to works of Toystoy thank other works of Dostoyevsky in terms of emotional valence. One interesting observation is that works which are considered the greatest for both authors have also biggest changes in emotional valence.
+```{r}
+tolstoy_emotional_valence["author"] <- "Tolstoy, Leo"
+dostoyevsky_emotional_valence["author"] <- "Dostoyevsky, Fyodor"
+rbind(tolstoy_emotional_valence,dostoyevsky_emotional_valence) %>% 
+  filter(title %in% c("Anna Karenina", "War and Peace", "The Idiot", "Brothers Karamazov", "Crime and Punishment")) %>%
+ggplot(aes(x = index, y = emotional_valence, color = title, linetype = author)) + geom_line()
+```
+ Let's look at perspecitive of distinct emotions in the works:
+ 
+```{r}
+row.names(dostoyevsky_emotional_summary) <- 1:6
+dostoyevsky_emotional_summary_df <- as.data.frame(dostoyevsky_emotional_summary)
+dostoyevsky_emotional_summary_df["author"] <- "Dostoyevsky, Fyodor"
+
+row.names(tolstoy_emotional_summary) <- 1:4
+tolstoy_emotional_summary_df <- as.data.frame(tolstoy_emotional_summary) 
+tolstoy_emotional_summary_df["author"] <-  "Tolstoy, Leo"
+
+emotional_summary_df <- rbind(dostoyevsky_emotional_summary_df, tolstoy_emotional_summary_df) %>% gather(emotion, value, joy:anger) 
+
+emotional_summary_df["emotion"] <- fct_relevel(as_factor(emotional_summary_df[,"emotion"]), c("joy","trust","anticipation","surprise","sadness","disgust","fear","anger"))
+```
+ 
+```{r}
+ggplot(emotional_summary_df, aes(x = title, y = value, fill = emotion)) +
+  geom_col(position = position_dodge()) +
+  coord_flip() +
+  scale_color_brewer(2) +
+  
+  theme(axis.ticks=element_blank(), axis.text.x=element_blank()) +
+  facet_wrap(~author, scales = "free_y")
+```
+First we notice for both authors is that universally strongest emotion are trust and anticipation.  With information we have it is hard to judge if this is some charateristic of work, or maybe it is caused by some flaw in analysis method. To evalute it properly we should conduct proper analysis of the bigger corpora of works from the period. Some impressions one could take is that negative emotions are more common in works of Dostoyevsky than in writing of Tolstoy. In Crime and Punishment and Brothers Karamazov, and in Notes fom the Underground fear is one of the dominating emotions. The Idiot seems to be most positive of Dostoyevsky works from the one we examined. When examining works of Tolstoy we see that some later work like Master and Man and Resurection contains more negative emotions, while in both Anna Karenina and War and Peace joy is one of the most common sentiments.
+Still we should treat this analysis as tool for hypothesis generation. 
+
+
+Syuzhet is fantastic tool. I makes sentiment analysis easy and pleasant. I found it particular useful for exploratory analysis and hypothesis generation of longer textual data. Still there is a number of hyperparametrs we have to tune to use, we have to choose the right lexicon and sentiment analysis method and it is not clear which methods of smoothing work best. Most of existing benchmarks for sentiment analysis are done for differnt kinds of texts - e.g. movie reviews and therefore are not always applicable for corpora of fiction, which often uses very specific, older language. To evaluate it properly it would be great to have bigger, sentiment annotated corpora of literature.
